@@ -34,8 +34,10 @@
 #include "bitlash.h"
 #include "Wire.h"
 #include "DHT.h"
+#include "MCP342x.h"
 
 DHT dht(A1, DHT22);
+MCP342x adc; // default address is 0x68
 
 // CLI user function names
 // function names must be no more than 11 characters long
@@ -45,6 +47,7 @@ const char * func_select_co = "co";
 const char * func_select_ozone = "o3";
 const char * func_humidity = "humidity";
 const char * func_temp = "temp";
+const char * func_adc = "adc";
 
 void scanI2CBus(byte from_addr, byte to_addr, 
                 void(*callback)(byte address, byte result) );
@@ -96,6 +99,23 @@ numvar humidity(void){
   }
 }
 
+numvar read_adc(void){
+  long value = 0;
+  MCP342x::Config status;
+  // Initiate a conversion; convertAndRead() will wait until it can be read
+  uint8_t err = adc.convertAndRead(MCP342x::channel1, MCP342x::oneShot,
+				   MCP342x::resolution16, MCP342x::gain1,
+				   1000000, value, status);
+  if (err) {
+    Serial.print("Convert error: ");
+    Serial.println(err);
+  }
+  else {
+    Serial.print("Value: ");
+    Serial.println(value);
+  }  
+}
+
 
 void setup(void) {
         // initialize the slot select pins to "not selected"
@@ -120,6 +140,7 @@ void setup(void) {
 	addBitlashFunction(func_select_ozone, (bitlash_function) selectSlot3);
         addBitlashFunction(func_temp, (bitlash_function) temperature);
         addBitlashFunction(func_humidity, (bitlash_function) humidity);
+        addBitlashFunction(func_adc, (bitlash_function) read_adc);
 }
 
 void loop(void) {

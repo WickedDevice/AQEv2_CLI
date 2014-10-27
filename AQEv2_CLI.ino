@@ -35,9 +35,11 @@
 #include "Wire.h"
 #include "DHT.h"
 #include "MCP342x.h"
+#include "LMP91000.h"
 
 DHT dht(A1, DHT22);
 MCP342x adc; // default address is 0x68
+LMP91000 lmp91000;
 
 // CLI user function names
 // function names must be no more than 11 characters long
@@ -48,6 +50,7 @@ const char * func_select_ozone = "o3";
 const char * func_humidity = "humidity";
 const char * func_temp = "temp";
 const char * func_adc = "adc";
+const char * func_log = "log";
 
 void scanI2CBus(byte from_addr, byte to_addr, 
                 void(*callback)(byte address, byte result) );
@@ -116,6 +119,49 @@ numvar read_adc(void){
   }  
 }
 
+numvar datalog(void){
+  long value = 0;
+  MCP342x::Config status;
+  
+  Serial.println("Time\tNO2\tCO\tO3\tTemp\tHum");
+  while(1){       
+    
+    Serial.print(millis());
+    Serial.print("\t");
+    
+    selectSlot1();
+    adc.convertAndRead(MCP342x::channel1, MCP342x::oneShot, 
+      MCP342x::resolution16, MCP342x::gain1, 1000000, value, status);    
+    Serial.print(value);
+    Serial.print("\t");
+    
+    selectSlot2();
+    adc.convertAndRead(MCP342x::channel1, MCP342x::oneShot, 
+      MCP342x::resolution16, MCP342x::gain1, 1000000, value, status);    
+    Serial.print(value);    
+    Serial.print("\t");
+    
+    selectSlot3();
+    adc.convertAndRead(MCP342x::channel1, MCP342x::oneShot, 
+      MCP342x::resolution16, MCP342x::gain1, 1000000, value, status);    
+    Serial.print(value);            
+    Serial.print("\t");  
+
+    float t = dht.readTemperature();        
+    
+    Serial.print(t, 2);                
+    Serial.print("\t");  
+
+    float h = dht.readHumidity();
+
+    Serial.print(h, 2);                
+    Serial.print("\t");      
+    
+    Serial.println();
+
+    delay(1000);
+  }
+}
 
 void setup(void) {
         // initialize the slot select pins to "not selected"
@@ -125,6 +171,30 @@ void setup(void) {
         
         // fire up the i2c bus
         Wire.begin();
+
+        selectSlot1(); //NO2
+        lmp91000.configure( 
+            LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
+            LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_67PCT 
+                  | LMP91000_BIAS_SIGN_NEG | LMP91000_BIAS_8PCT,
+            LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC                  
+        );        
+
+        selectSlot2(); //CO
+        lmp91000.configure( 
+            LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
+            LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_20PCT 
+                  | LMP91000_BIAS_SIGN_POS | LMP91000_BIAS_1PCT,
+            LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC                  
+        );        
+        
+        selectSlot3(); //O3
+        lmp91000.configure( 
+            LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
+            LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_67PCT 
+                  | LMP91000_BIAS_SIGN_NEG | LMP91000_BIAS_1PCT,
+            LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC                  
+        );        
         
         // initialize the DHT22
         dht.begin();
@@ -141,6 +211,7 @@ void setup(void) {
         addBitlashFunction(func_temp, (bitlash_function) temperature);
         addBitlashFunction(func_humidity, (bitlash_function) humidity);
         addBitlashFunction(func_adc, (bitlash_function) read_adc);
+        addBitlashFunction(func_log, (bitlash_function) datalog);
 }
 
 void loop(void) {

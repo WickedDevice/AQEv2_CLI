@@ -1,4 +1,10 @@
-/***
+/*** 
+        Command Line Interface for AQE v2 built on Bitlash
+        Copyright (C) 2014 Victor Aprea for Wicked Device LLC     
+***/
+
+/*** Derived From:
+
 	userfunctions.pde:	Bitlash User Functions Demo Code
 
 	Copyright (C) 2008-2012 Bill Roy
@@ -61,6 +67,7 @@ void scanFunc( byte addr, byte result ) {
     Serial.print("0x");
     if(addr < 16) Serial.print("0");
     Serial.println(addr, HEX); 
+  }
 }
 
 numvar scani2c(void) { 

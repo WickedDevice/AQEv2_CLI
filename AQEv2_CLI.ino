@@ -32,14 +32,23 @@
 
 ***/
 #include "bitlash.h"
-#include "Wire.h"
 #include "DHT.h"
 #include "MCP342x.h"
 #include "LMP91000.h"
+#include "WildFire.h"
+#include <avr/eeprom.h>
+#include <Wire.h>
+#include <SD.h>
 
+const int sdChipSelect = 16;
+
+WildFire wf;
 DHT dht(A1, DHT22);
 MCP342x adc; // default address is 0x68
 LMP91000 lmp91000;
+char filename[64] = "";
+boolean sdcard_present = true;
+boolean stop_log = false;
 
 // CLI user function names
 // function names must be no more than 11 characters long
@@ -51,6 +60,12 @@ const char * func_humidity = "humidity";
 const char * func_temp = "temp";
 const char * func_adc = "adc";
 const char * func_log = "log";
+const char * func_getfilename = "getlog";
+const char * func_setfilename = "setlog";
+const char * func_stoplog = "stoplog";
+const char * func_dumplog = "dumplog";
+const char * func_ls = "sdls";
+const char * func_rm = "sdrm";
 
 void scanI2CBus(byte from_addr, byte to_addr, 
                 void(*callback)(byte address, byte result) );
@@ -119,55 +134,181 @@ numvar read_adc(void){
   }  
 }
 
+numvar getfilename(void){
+  Serial.print("Filename: ");
+  Serial.println(filename); 
+}
+
+numvar setfilename(void){
+  strncpy(filename, (char *) getarg(1), sizeof(filename));
+  eeprom_write_block(filename, 0, 64);
+}
+
+void sdAppendRow(char * str){
+  File dataFile = SD.open(filename, FILE_WRITE);  
+  if(dataFile){
+    dataFile.println(str);
+    dataFile.close(); 
+  } 
+}
+
+numvar stoplog(void){
+  stop_log = true; 
+}
+
+numvar rm(void){
+  Serial.print("Removing filename: ");
+  Serial.print(filename);
+  Serial.print("...");
+  if(SD.exists(filename)){
+    SD.remove(filename);
+    Serial.println("done");
+  }
+  else{
+    Serial.println("doesn't exist");        
+  }
+}
+
+numvar ls(void){
+  if(sdcard_present){      
+    File root = SD.open("/");
+    printDirectory(root, 0);
+    root.close();
+  }
+}
+
+void printDirectory(File dir, int numTabs) {
+   while(true) {    
+     File entry =  dir.openNextFile();
+     if (! entry) {
+       // no more files
+       //Serial.println("**nomorefiles**");
+       break;
+     }
+     for (uint8_t i=0; i<numTabs; i++) {
+       Serial.print('\t');
+     }
+     Serial.print(entry.name());
+     if (entry.isDirectory()) {
+       Serial.println("/");
+       printDirectory(entry, numTabs+1);
+     } else {
+       // files have sizes, directories do not
+       Serial.print("\t\t");
+       Serial.println(entry.size(), DEC);
+     }
+     entry.close();
+   }
+}
+
+numvar dumplog(void){
+  if(sdcard_present){
+    File dataFile = SD.open(filename);
+  
+    // if the file is available, write to it:
+    if (dataFile) {
+      while (dataFile.available()) {
+        Serial.write(dataFile.read());
+      }
+      dataFile.close();
+    }    
+  }
+}
+
 numvar datalog(void){
   long value = 0;
   MCP342x::Config status;
+  stop_log = false;
+  if(sdcard_present && strcmp(filename,"") == 0){
+    Serial.println("Please use setlog(\"yourfilename.txt\") to set the filename to log to");
+    return 0;
+  }
+  else if(sdcard_present){
+    Serial.print("Logging to SD card ");
+    getfilename();
+  }
   
-  Serial.println("Time\tNO2\tCO\tO3\tTemp\tHum");
-  while(1){       
+  const char * header_row = "Time\tNO2\tCO\tO3\tTemp\tHum";
+  sdAppendRow((char *) header_row);
+  Serial.println(header_row);
+ 
+  char buf[1024] = "";
+  char temp[16] = "";
+  while(1){           
+    const char * tab = "\t";
+    buf[0] = 0; // clear the buffer
     
-    Serial.print(millis());
-    Serial.print("\t");
+    uint32_t mil = millis();
+    ltoa(mil, temp, 10);  
+    Serial.print(mil);
+    Serial.print(tab);
+    strcat(buf, temp);
+    strcat(buf, tab);
     
     selectSlot1();
     adc.convertAndRead(MCP342x::channel1, MCP342x::oneShot, 
       MCP342x::resolution16, MCP342x::gain1, 1000000, value, status);    
     Serial.print(value);
-    Serial.print("\t");
+    Serial.print(tab);
+    ltoa(value, temp, 10);
+    strcat(buf, temp);
+    strcat(buf, tab);    
     
     selectSlot2();
     adc.convertAndRead(MCP342x::channel1, MCP342x::oneShot, 
       MCP342x::resolution16, MCP342x::gain1, 1000000, value, status);    
     Serial.print(value);    
     Serial.print("\t");
+    ltoa(value, temp, 10);
+    strcat(buf, temp);
+    strcat(buf, tab);
     
     selectSlot3();
     adc.convertAndRead(MCP342x::channel1, MCP342x::oneShot, 
       MCP342x::resolution16, MCP342x::gain1, 1000000, value, status);    
     Serial.print(value);            
     Serial.print("\t");  
-
+    ltoa(value, temp, 10);
+    strcat(buf, temp);
+    strcat(buf, tab);
+    
     float t = dht.readTemperature();        
     
     Serial.print(t, 2);                
     Serial.print("\t");  
-
+    dtostrf(t, 7, 2, temp);
+    strcat(buf, temp);
+    strcat(buf, tab);
+    
     float h = dht.readHumidity();
 
     Serial.print(h, 2);                
     Serial.print("\t");      
+    dtostrf(h, 7, 2, temp);
+    strcat(buf, temp);
+    strcat(buf, tab);
     
     Serial.println();
-
+    sdAppendRow(buf);
+    
+    for(uint8_t ii = 0; ii < 20; ii++){
+      runBitlash();
+    }
+    
+    if(stop_log){
+      return 0; 
+    }
     delay(1000);
   }
 }
 
 void setup(void) {
+        wf.begin();
+        eeprom_read_block(filename, 0, 64); // read the filename into RAM
         // initialize the slot select pins to "not selected"
         pinMode(7, OUTPUT);  digitalWrite(7, LOW);
         pinMode(9, OUTPUT);  digitalWrite(9, LOW);
-        pinMode(10, OUTPUT); digitalWrite(10, LOW);
+        pinMode(10, OUTPUT); digitalWrite(10, LOW);        
         
         // fire up the i2c bus
         Wire.begin();
@@ -198,9 +339,19 @@ void setup(void) {
         
         // initialize the DHT22
         dht.begin();
-                
+              
         // kick off bitlash
 	initBitlash(115200);		// must be first to initialize serial port
+
+        if(!SD.begin(sdChipSelect)) {
+          Serial.println("Card failed, or not present");
+          Serial.print(">");
+          sdcard_present = false;
+        }   
+        else{
+          Serial.println("SD Card initialized");
+          Serial.print(">");          
+        }     
 
         // bind user functions to CLI names
         // careful out of the box, bitlash allows 20 user functions (MAX_USER_FUNCTIONS)
@@ -212,6 +363,36 @@ void setup(void) {
         addBitlashFunction(func_humidity, (bitlash_function) humidity);
         addBitlashFunction(func_adc, (bitlash_function) read_adc);
         addBitlashFunction(func_log, (bitlash_function) datalog);
+        addBitlashFunction(func_getfilename, (bitlash_function) getfilename);                
+        addBitlashFunction(func_setfilename, (bitlash_function) setfilename);
+        addBitlashFunction(func_stoplog, (bitlash_function) stoplog);      
+        addBitlashFunction(func_dumplog, (bitlash_function) dumplog);    
+        addBitlashFunction(func_ls, (bitlash_function) ls);            
+        addBitlashFunction(func_rm, (bitlash_function) rm);                         
+        
+        uint32_t start = millis();
+        uint8_t ii = 9;
+        Serial.println("Hit <Enter> within 10 seconds to prevent auto log");
+        boolean auto_log = true;
+        for(;;){           
+           if(Serial.available()){
+               auto_log = false;
+               break;
+           }
+           
+           Serial.print(ii--);
+           Serial.print("...");
+           delay(1000);
+           
+           if(millis() > start + 10000){
+             break; 
+           }                      
+        }
+        Serial.println();
+        
+        if(auto_log){
+           datalog();
+        }
 }
 
 void loop(void) {

@@ -3,34 +3,6 @@
         Copyright (C) 2014 Victor Aprea for Wicked Device LLC     
 ***/
 
-/*** Derived From:
-
-	userfunctions.pde:	Bitlash User Functions Demo Code
-
-	Copyright (C) 2008-2012 Bill Roy
-
-	Permission is hereby granted, free of charge, to any person
-	obtaining a copy of this software and associated documentation
-	files (the "Software"), to deal in the Software without
-	restriction, including without limitation the rights to use,
-	copy, modify, merge, publish, distribute, sublicense, and/or sell
-	copies of the Software, and to permit persons to whom the
-	Software is furnished to do so, subject to the following
-	conditions:
-	
-	The above copyright notice and this permission notice shall be
-	included in all copies or substantial portions of the Software.
-	
-	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-	EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
-	OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-	NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-	HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-	WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-	FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
-	OTHER DEALINGS IN THE SOFTWARE.
-
-***/
 #include "bitlash.h"
 #include "DHT.h"
 #include "MCP342x.h"
@@ -49,6 +21,13 @@ LMP91000 lmp91000;
 char filename[64] = "";
 boolean sdcard_present = true;
 boolean stop_log = false;
+
+#define NUM_SAMPLES_TO_AVERAGE (16)
+#define NO2_INDEX (0)
+#define CO_INDEX  (1)
+#define O3_INDEX  (2)
+float gas_averaging_window[3][NUM_SAMPLES_TO_AVERAGE];
+uint8_t gas_averaging_window_index = 0;
 
 // CLI user function names
 // function names must be no more than 11 characters long
@@ -72,6 +51,26 @@ void scanI2CBus(byte from_addr, byte to_addr,
 
 numvar scani2c(void) { 
   scanI2CBus(1, 127, scanFunc);
+}
+
+void addValueToAveragingWindow(float value, uint8_t gas_index){
+  gas_averaging_window[gas_index][gas_averaging_window_index] = value;
+}
+
+void advanceAveragingWindowIndex(void){
+  gas_averaging_window_index++;
+  if(gas_averaging_window_index >= NUM_SAMPLES_TO_AVERAGE){
+    gas_averaging_window_index = 0;
+  }
+}
+
+float getWindowedAverageGasReading(uint8_t gas_index){
+  float sum = 0.0f;
+  for(uint8_t ii = 0; ii < NUM_SAMPLES_TO_AVERAGE; ii++){
+     sum += gas_averaging_window[gas_index][ii];
+  }
+  
+  return sum / NUM_SAMPLES_TO_AVERAGE;
 }
 
 void selectNoSlot(void){
@@ -215,10 +214,22 @@ numvar dumplog(void){
   }
 }
 
-numvar datalog(void){
-  long value = 0;
+float burstSampleADC(void){
+  #define NUM_SAMPLES_PER_BURST (16)
   MCP342x::Config status;
+  int32_t burst_sample_total = 0;
+  int32_t value = 0;
+  for(uint8_t ii = 0; ii < NUM_SAMPLES_PER_BURST; ii++){
+    adc.convertAndRead(MCP342x::channel1, MCP342x::oneShot, 
+      MCP342x::resolution16, MCP342x::gain1, 1000000, value, status);   
+    burst_sample_total += value;
+  }
+  return (1.0f * burst_sample_total) / NUM_SAMPLES_PER_BURST;
+}
+
+numvar datalog(void){  
   stop_log = false;
+  long value = 0;
   if(sdcard_present && strcmp(filename,"") == 0){
     Serial.println("Please use setlog(\"yourfilename.txt\") to set the filename to log to");
     return 0;
@@ -228,12 +239,13 @@ numvar datalog(void){
     getfilename();
   }
   
-  const char * header_row = "Time\tNO2\tCO\tO3\tTemp\tHum";
+  const char * header_row = "Time[ms]\tNO2[ticks]\tNO2_filt[ticks]\tCO[ticks]\tCO_filt[ticks]\tO3[ticks]\tO3_filt[ticks]\tTemp[degC]\tHum[%]";
   sdAppendRow((char *) header_row);
   Serial.println(header_row);
  
   char buf[1024] = "";
   char temp[16] = "";
+  float f = 0.0f;
   while(1){           
     const char * tab = "\t";
     buf[0] = 0; // clear the buffer
@@ -245,32 +257,58 @@ numvar datalog(void){
     strcat(buf, temp);
     strcat(buf, tab);
     
-    selectSlot1();
-    adc.convertAndRead(MCP342x::channel1, MCP342x::oneShot, 
-      MCP342x::resolution16, MCP342x::gain1, 1000000, value, status);    
+    selectSlot2(); 
+    f = burstSampleADC(); 
+    value = (long) (f+0.5);
     Serial.print(value);
     Serial.print(tab);
     ltoa(value, temp, 10);
     strcat(buf, temp);
     strcat(buf, tab);    
     
-    selectSlot2();
-    adc.convertAndRead(MCP342x::channel1, MCP342x::oneShot, 
-      MCP342x::resolution16, MCP342x::gain1, 1000000, value, status);    
-    Serial.print(value);    
-    Serial.print("\t");
-    ltoa(value, temp, 10);
-    strcat(buf, temp);
-    strcat(buf, tab);
-    
-    selectSlot3();
-    adc.convertAndRead(MCP342x::channel1, MCP342x::oneShot, 
-      MCP342x::resolution16, MCP342x::gain1, 1000000, value, status);    
-    Serial.print(value);            
+    addValueToAveragingWindow(f, NO2_INDEX);    
+    f = getWindowedAverageGasReading(NO2_INDEX);
+    Serial.print(f, 2);                
     Serial.print("\t");  
+    dtostrf(f, 7, 2, temp);
+    strcat(buf, temp);
+    strcat(buf, tab);    
+    
+    selectSlot3(); 
+    f = burstSampleADC();
+    value = (long) (f+0.5);
+    Serial.print(value);
+    Serial.print(tab);
     ltoa(value, temp, 10);
     strcat(buf, temp);
-    strcat(buf, tab);
+    strcat(buf, tab);  
+
+    addValueToAveragingWindow(f, CO_INDEX);    
+    f = getWindowedAverageGasReading(CO_INDEX);
+    Serial.print(f, 2);                
+    Serial.print("\t");  
+    dtostrf(f, 7, 2, temp);
+    strcat(buf, temp);
+    strcat(buf, tab);    
+    
+    selectSlot1(); // O3
+    f = burstSampleADC();
+    value = (long) (f+0.5);
+    Serial.print(value);
+    Serial.print(tab);
+    ltoa(value, temp, 10);
+    strcat(buf, temp);
+    strcat(buf, tab);  
+
+    addValueToAveragingWindow(f, O3_INDEX);    
+    f = getWindowedAverageGasReading(O3_INDEX);
+    Serial.print(f, 2);                
+    Serial.print("\t");  
+    dtostrf(f, 7, 2, temp);
+    strcat(buf, temp);
+    strcat(buf, tab);  
+    
+    advanceAveragingWindowIndex();
     
     float t = dht.readTemperature();        
     
@@ -313,7 +351,7 @@ void setup(void) {
         // fire up the i2c bus
         Wire.begin();
 
-        selectSlot1(); //NO2
+        selectSlot2(); //NO2
         lmp91000.configure( 
             LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
             LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_67PCT 
@@ -321,7 +359,7 @@ void setup(void) {
             LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC                  
         );        
 
-        selectSlot2(); //CO
+        selectSlot3(); //CO
         lmp91000.configure( 
             LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
             LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_20PCT 
@@ -329,7 +367,7 @@ void setup(void) {
             LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC                  
         );        
         
-        selectSlot3(); //O3
+        selectSlot1(); //O3
         lmp91000.configure( 
             LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
             LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_67PCT 
@@ -356,9 +394,9 @@ void setup(void) {
         // bind user functions to CLI names
         // careful out of the box, bitlash allows 20 user functions (MAX_USER_FUNCTIONS)
 	addBitlashFunction(func_scani2c, (bitlash_function) scani2c);
-	addBitlashFunction(func_select_no2, (bitlash_function) selectSlot1);
-	addBitlashFunction(func_select_co, (bitlash_function) selectSlot2);
-	addBitlashFunction(func_select_ozone, (bitlash_function) selectSlot3);
+	addBitlashFunction(func_select_no2, (bitlash_function) selectSlot2);
+	addBitlashFunction(func_select_co, (bitlash_function) selectSlot3);
+	addBitlashFunction(func_select_ozone, (bitlash_function) selectSlot1);
         addBitlashFunction(func_temp, (bitlash_function) temperature);
         addBitlashFunction(func_humidity, (bitlash_function) humidity);
         addBitlashFunction(func_adc, (bitlash_function) read_adc);

@@ -22,12 +22,15 @@ char filename[64] = "";
 boolean sdcard_present = true;
 boolean stop_log = false;
 
-#define NUM_SAMPLES_TO_AVERAGE (16)
-#define NO2_INDEX (0)
-#define CO_INDEX  (1)
-#define O3_INDEX  (2)
-float gas_averaging_window[3][NUM_SAMPLES_TO_AVERAGE];
+#define NUM_SAMPLES_TO_AVERAGE (32)
+#define NO2_INDEX  (0)
+#define CO_INDEX   (1)
+#define O3_INDEX   (2)
+#define TEMP_INDEX (3)
+#define HUM_INDEX  (4)
+float gas_averaging_window[5][NUM_SAMPLES_TO_AVERAGE];
 uint8_t gas_averaging_window_index = 0;
+uint8_t num_values_collected = 1; // so as not to average empty buffer space
 
 // CLI user function names
 // function names must be no more than 11 characters long
@@ -62,15 +65,24 @@ void advanceAveragingWindowIndex(void){
   if(gas_averaging_window_index >= NUM_SAMPLES_TO_AVERAGE){
     gas_averaging_window_index = 0;
   }
+  
+  if(num_values_collected < NUM_SAMPLES_TO_AVERAGE){
+    num_values_collected++;
+  }
 }
 
 float getWindowedAverageGasReading(uint8_t gas_index){
   float sum = 0.0f;
-  for(uint8_t ii = 0; ii < NUM_SAMPLES_TO_AVERAGE; ii++){
+  uint8_t upper_bound = NUM_SAMPLES_TO_AVERAGE;
+  if(num_values_collected < upper_bound) {
+      upper_bound = num_values_collected;
+  }
+  
+  for(uint8_t ii = 0; ii < upper_bound; ii++){
      sum += gas_averaging_window[gas_index][ii];
   }
   
-  return sum / NUM_SAMPLES_TO_AVERAGE;
+  return sum / upper_bound;
 }
 
 void selectNoSlot(void){
@@ -239,7 +251,7 @@ numvar datalog(void){
     getfilename();
   }
   
-  const char * header_row = "Time[ms]\tNO2[ticks]\tNO2_filt[ticks]\tCO[ticks]\tCO_filt[ticks]\tO3[ticks]\tO3_filt[ticks]\tTemp[degC]\tHum[%]";
+  const char * header_row = "Time[ms]\tNO2[ticks]\tNO2_filt[ticks]\tCO[ticks]\tCO_filt[ticks]\tO3[ticks]\tO3_filt[ticks]\tTemp[degC]\tTemp_filt[degC]\tHum[%]\tHum_filt[%]";
   sdAppendRow((char *) header_row);
   Serial.println(header_row);
  
@@ -259,7 +271,7 @@ numvar datalog(void){
     
     selectSlot2(); 
     f = burstSampleADC(); 
-    value = (long) (f+0.5);
+    value = (long) f;
     Serial.print(value);
     Serial.print(tab);
     ltoa(value, temp, 10);
@@ -276,7 +288,7 @@ numvar datalog(void){
     
     selectSlot3(); 
     f = burstSampleADC();
-    value = (long) (f+0.5);
+    value = (long) f;
     Serial.print(value);
     Serial.print(tab);
     ltoa(value, temp, 10);
@@ -293,7 +305,7 @@ numvar datalog(void){
     
     selectSlot1(); // O3
     f = burstSampleADC();
-    value = (long) (f+0.5);
+    value = (long) f;
     Serial.print(value);
     Serial.print(tab);
     ltoa(value, temp, 10);
@@ -306,23 +318,33 @@ numvar datalog(void){
     Serial.print("\t");  
     dtostrf(f, 7, 2, temp);
     strcat(buf, temp);
-    strcat(buf, tab);  
-    
-    advanceAveragingWindowIndex();
+    strcat(buf, tab);     
     
     float t = dht.readTemperature();        
-    
+    addValueToAveragingWindow(t, TEMP_INDEX);    
+    f = getWindowedAverageGasReading(TEMP_INDEX);
     Serial.print(t, 2);                
     Serial.print("\t");  
     dtostrf(t, 7, 2, temp);
     strcat(buf, temp);
+    strcat(buf, tab);        
+    Serial.print(f, 2);                
+    Serial.print("\t");  
+    dtostrf(f, 7, 2, temp);
+    strcat(buf, temp);
     strcat(buf, tab);
     
     float h = dht.readHumidity();
-
+    addValueToAveragingWindow(h, HUM_INDEX);    
+    f = getWindowedAverageGasReading(HUM_INDEX);    
     Serial.print(h, 2);                
-    Serial.print("\t");      
+    Serial.print("\t");  
     dtostrf(h, 7, 2, temp);
+    strcat(buf, temp);
+    strcat(buf, tab);        
+    Serial.print(f, 2);                
+    Serial.print("\t");  
+    dtostrf(f, 7, 2, temp);
     strcat(buf, temp);
     strcat(buf, tab);
     
@@ -332,6 +354,8 @@ numvar datalog(void){
     for(uint8_t ii = 0; ii < 20; ii++){
       runBitlash();
     }
+    
+    advanceAveragingWindowIndex();    
     
     if(stop_log){
       return 0; 

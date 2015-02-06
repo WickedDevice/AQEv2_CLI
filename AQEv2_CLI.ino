@@ -3,6 +3,7 @@
         Copyright (C) 2014 Victor Aprea for Wicked Device LLC     
 ***/
 
+#include <SPI.h>
 #include "bitlash.h"
 #include "DHT.h"
 #include "MCP342x.h"
@@ -48,6 +49,10 @@ const char * func_stoplog = "stoplog";
 const char * func_dumplog = "dumplog";
 const char * func_ls = "sdls";
 const char * func_rm = "sdrm";
+const char * func_lmp91k_read = "lmp91k";
+const char * func_lmp91k_cfg_o3 = "cfg_o3";
+const char * func_lmp91k_cfg_no2 = "cfg_no2";
+const char * func_lmp91k_cfg_co = "cfg_co";
 
 void scanI2CBus(byte from_addr, byte to_addr, 
                 void(*callback)(byte address, byte result) );
@@ -153,6 +158,202 @@ numvar getfilename(void){
 numvar setfilename(void){
   strncpy(filename, (char *) getarg(1), sizeof(filename));
   eeprom_write_block(filename, 0, 64);
+}
+
+numvar lmp91k_read(void){
+  uint8_t value = 0;
+  
+  value = lmp91000.read(LMP91000_STATUS_REG);
+  Serial.print(F("STATUS: "));
+  hex_println(value);
+  if(value == 0){
+    Serial.println(F("  not ready"));
+  }
+  else if(value == 1){
+    Serial.println(F("  ready"));
+  }
+  else{
+    Serial.println(F("  undefined"));
+  }
+  
+  
+  value = lmp91000.read(LMP91000_LOCK_REG);
+  Serial.print(F("LOCK:   "));
+  hex_println(value);
+  if(value == 0){
+    Serial.println(F("  Registers 0x10, 0x11 in write mode"));
+  }  
+  else if(value == 1){
+    Serial.println(F("  Registers 0x10, 0x11 in read only mode (default)"));
+  }
+  else{
+    Serial.println(F("  undefined"));  
+  } 
+  
+  value = lmp91000.read(LMP91000_TIACN_REG);
+  Serial.print(F("TIACN:  "));
+  hex_println(value);
+  switch(value & B00000011){
+    case 0:
+      Serial.println(F("  RLoad selection = 10 Ohm"));
+      break;
+    case 1:
+      Serial.println(F("  RLoad selection = 33 Ohm"));
+      break;
+    case 2:
+      Serial.println(F("  RLoad selection = 50 Ohm"));
+      break;
+    case 3:
+      Serial.println(F("  RLoad selection = 100 Ohm (default)"));
+      break; 
+  }  
+  switch((value >> 2) & B00000111){
+    case 0:
+      Serial.println(F("  TIA feedback resistance selection = External resistance (default)"));
+      break;
+    case 1:
+      Serial.println(F("  TIA feedback resistance selection =  2.75kOhm"));
+      break;
+    case 2:
+      Serial.println(F("  TIA feedback resistance selection =  3.5kOhm"));
+      break;
+    case 3:
+      Serial.println(F("  TIA feedback resistance selection =  7kOhm"));
+      break;
+    case 4:
+      Serial.println(F("  TIA feedback resistance selection =  14kOhm"));
+      break;
+    case 5:
+      Serial.println(F("  TIA feedback resistance selection =  35kOhm"));
+      break;
+    case 6:
+      Serial.println(F("  TIA feedback resistance selection =  120kOhm"));
+      break;
+    case 7:
+      Serial.println(F("  TIA feedback resistance selection =  350kOhm"));
+      break; 
+  }
+  
+  value = lmp91000.read(LMP91000_REFCN_REG);
+  Serial.print(F("REFCN:  "));
+  hex_println(value);
+  switch(value & 0x80){
+    case 0: 
+      Serial.println(F("  Reference voltage source selection = Internal (default)"));
+      break;
+    case 0x80:
+      Serial.println(F("  Reference voltage source selection = external"));
+      break;
+    default:
+      Serial.println(F("  undefined"));
+  }
+  switch((value >> 5) & 3){
+    case 0:
+      Serial.println(F("  Internal zero selection = 20% of the source reference"));
+      break;
+    case 1:
+      Serial.println(F("  Internal zero selection = 50% of the source reference (default)"));
+      break;
+    case 2:
+      Serial.println(F("  Internal zero selection = 67% of the source reference"));
+      break;
+    case 3:
+      Serial.println(F("  Internal zero selection = Internal zero circuitry bypassed"));
+      break;      
+  }
+  if((value & B00010000) == 0){
+    Serial.println(F("  Selection of the Bias polarity = Negative (VWE - VRE) < 0V (default)"));
+  }
+  else{
+    Serial.println(F("  Selection of the Bias polarity = Positive (VWE - VRE) > 0V"));
+  }
+  switch(value & B00001111){
+    case 0:
+      Serial.println(F("  BIAS selection =  0% of the source reference (default)"));
+      break;  
+    case 1:
+      Serial.println(F("  BIAS selection =  1% of the source reference"));
+      break;  
+    case 2:
+      Serial.println(F("  BIAS selection =  2% of the source reference"));
+      break;  
+    case 3:
+      Serial.println(F("  BIAS selection =  4% of the source reference"));
+      break;  
+    case 4:
+      Serial.println(F("  BIAS selection =  6% of the source reference"));
+      break;  
+    case 5:
+      Serial.println(F("  BIAS selection =  8% of the source reference"));
+      break;  
+    case 6:
+      Serial.println(F("  BIAS selection =  10% of the source reference"));
+      break;  
+    case 7:
+      Serial.println(F("  BIAS selection =  12% of the source reference"));
+      break;  
+    case 8:
+      Serial.println(F("  BIAS selection =  14% of the source reference"));
+      break;  
+    case 9:
+      Serial.println(F("  BIAS selection =  16% of the source reference"));
+      break;  
+    case 10:
+      Serial.println(F("  BIAS selection =  18% of the source reference"));
+      break;  
+    case 11:
+      Serial.println(F("  BIAS selection =  20% of the source reference"));
+      break;  
+    case 12:
+      Serial.println(F("  BIAS selection =  22% of the source reference"));
+      break;  
+    case 13:      
+      Serial.println(F("  BIAS selection =  24% of the source reference"));
+      break;      
+    default:
+      Serial.println(F("  undefined"));
+      break;
+  }
+  
+  value = lmp91000.read(LMP91000_MODECN_REG);
+  Serial.print(F("MODECN: "));
+  hex_println(value); 
+  if((value & 0x80) == 0){
+     Serial.println(F("  Shorting FET feature = Disabled (default)")); 
+  }
+  else{
+     Serial.println(F("  Shorting FET feature = Enabled"));
+  }
+  switch(value & B00000111){
+    case 0:
+      Serial.println(F("  Mode of Operation selection = Deep Sleep (default)"));
+      break;
+    case 1:
+      Serial.println(F("  Mode of Operation selection = 2-lead ground referred galvanic cell"));
+      break;
+    case 2:
+      Serial.println(F("  Mode of Operation selection = Standby"));
+      break;
+    case 3:
+      Serial.println(F("  Mode of Operation selection = 3-lead amperometric cell"));
+      break;
+    case 6:
+      Serial.println(F("  Mode of Operation selection = Temperature measurement (TIA OFF)"));
+      break;
+    case 7:
+      Serial.println(F("  Mode of Operation selection =  Temperature measurement (TIA ON)"));
+      break;
+    default:
+      Serial.println(F("  undefined"));
+      break;     
+  }
+  
+}
+
+void hex_println(uint8_t value){
+  Serial.print(F("0x"));
+  if(value < 0x10) Serial.print(F("0"));
+  Serial.println(value, HEX);  
 }
 
 void sdAppendRow(char * str){
@@ -364,6 +565,39 @@ numvar datalog(void){
   }
 }
 
+numvar lmp91k_cfg_o3(void){
+  selectSlot1(); //O3
+  Serial.print(F("O3 Config Status = "));
+  Serial.println(lmp91000.configure( 
+      LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
+      LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_67PCT 
+            | LMP91000_BIAS_SIGN_NEG | LMP91000_BIAS_1PCT,
+      LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC                  
+  ));      
+}
+
+numvar lmp91k_cfg_no2(void){
+  selectSlot2(); //NO2
+  Serial.print(F("NO2 Config Status = "));
+  Serial.println(lmp91000.configure( 
+      LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
+      LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_67PCT 
+            | LMP91000_BIAS_SIGN_NEG | LMP91000_BIAS_8PCT,
+      LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC                  
+  ));  
+}
+
+numvar lmp91k_cfg_co(void){
+  selectSlot3(); //CO
+  Serial.print(F("CO Config Status = "));
+  Serial.println(lmp91000.configure( 
+      LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
+      LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_20PCT 
+            | LMP91000_BIAS_SIGN_POS | LMP91000_BIAS_1PCT,
+      LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC                  
+  ));  
+}
+
 void setup(void) {
         wf.begin();
         eeprom_read_block(filename, 0, 64); // read the filename into RAM
@@ -373,37 +607,17 @@ void setup(void) {
         pinMode(10, OUTPUT); digitalWrite(10, LOW);        
         
         // fire up the i2c bus
-        Wire.begin();
-
-        selectSlot2(); //NO2
-        lmp91000.configure( 
-            LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
-            LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_67PCT 
-                  | LMP91000_BIAS_SIGN_NEG | LMP91000_BIAS_8PCT,
-            LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC                  
-        );        
-
-        selectSlot3(); //CO
-        lmp91000.configure( 
-            LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
-            LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_20PCT 
-                  | LMP91000_BIAS_SIGN_POS | LMP91000_BIAS_1PCT,
-            LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC                  
-        );        
-        
-        selectSlot1(); //O3
-        lmp91000.configure( 
-            LMP91000_TIA_GAIN_350K | LMP91000_RLOAD_10OHM,
-            LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_67PCT 
-                  | LMP91000_BIAS_SIGN_NEG | LMP91000_BIAS_1PCT,
-            LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC                  
-        );        
+        Wire.begin();    
         
         // initialize the DHT22
         dht.begin();
               
         // kick off bitlash
 	initBitlash(115200);		// must be first to initialize serial port
+
+        lmp91k_cfg_no2();        
+        lmp91k_cfg_co();
+        lmp91k_cfg_o3();
 
         if(!SD.begin(sdChipSelect)) {
           Serial.println("Card failed, or not present");
@@ -431,6 +645,10 @@ void setup(void) {
         addBitlashFunction(func_dumplog, (bitlash_function) dumplog);    
         addBitlashFunction(func_ls, (bitlash_function) ls);            
         addBitlashFunction(func_rm, (bitlash_function) rm);                         
+        addBitlashFunction(func_lmp91k_read, (bitlash_function) lmp91k_read);
+        addBitlashFunction(func_lmp91k_cfg_o3, (bitlash_function) lmp91k_cfg_o3);
+        addBitlashFunction(func_lmp91k_cfg_no2, (bitlash_function) lmp91k_cfg_no2);
+        addBitlashFunction(func_lmp91k_cfg_co, (bitlash_function) lmp91k_cfg_co);        
         
         uint32_t start = millis();
         uint8_t ii = 9;
